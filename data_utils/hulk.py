@@ -14,6 +14,8 @@ from torchvision.transforms.functional import to_pil_image
 # Write a custom dataset class (inherits from torch.utils.data.Dataset)
 from torch.utils.data import Dataset
 
+from sklearn.preprocessing import MultiLabelBinarizer
+
 class Hulk(Dataset):
     """
     Huge datasret of sequential crop 256x256 of radio maps
@@ -25,13 +27,16 @@ class Hulk(Dataset):
         pass
         #return transforms
 
-    def __init__(self, targ_dir: str = "4-HULK", transform=None) -> None:
+    def __init__(self, targ_dir: str = "4-HULK", transform=None, datalist='info.json') -> None:
         #self.paths = list(pathlib.Path(targ_dir).glob("*.npy"))
         self.targ_dir       = targ_dir
         self.transform      = transform
-        self.info           = self.load_info()
+        self.info           = self.load_info(datalist)
+        self.classes = self.multilabel_one_hot_encoding()
         #self.class_to_idx   = self.enumerate_classes()
+        self.num_classes    = len(self.classes)
         #self.weights        = self.setup_weights()
+        print(self.info.describe())
 
 
     def setup_weights(self):
@@ -39,11 +44,18 @@ class Hulk(Dataset):
         weights =  1.0 / label_to_count[self.info["source_type"]]
         return torch.DoubleTensor(weights.to_list())
 
+    def multilabel_one_hot_encoding(self):
+        mlb = MultiLabelBinarizer()
+        self.info["one_hot"] = mlb.fit_transform(self.info["source_type"]).tolist()
+        print(mlb.classes_)
+        return mlb.classes_
+        
+
     def enumerate_classes(self):
         return {cls_name: i for i, cls_name in enumerate(self.info["source_type"].unique())}
     
-    def load_info(self):
-        info_file = os.path.join(self.targ_dir, 'info.json')
+    def load_info(self, datalist):
+        info_file = os.path.join(self.targ_dir, datalist)
         df = pd.read_json(info_file, orient="index")
         return df
 
@@ -57,7 +69,7 @@ class Hulk(Dataset):
             #return img, mask
         except:
             print(index)
-        return img, self.info.iloc[index]["source_type"]
+        return img, torch.FloatTensor(self.info.iloc[index]["one_hot"])
     
     def filter_dataset(self):
         # probably a Sampler will be used

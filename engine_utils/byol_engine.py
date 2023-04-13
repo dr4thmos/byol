@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from torchvision.transforms import transforms
-
+from sklearn.metrics import classification_report
 
 import numpy as np
 
@@ -16,9 +16,11 @@ from torch.utils.tensorboard import SummaryWriter
 from general_utils.byol_utils import _create_model_training_folder
 
 class BYOLTrainer:
-    def __init__(self, online_network, target_network, linear_classifier, predictor, optimizer, optimizer_classificator, device, logs_folder, exp_name, config_path, transforms_path, pretrained, img_size, recover, preview_shape, **params):
+    def __init__(self, online_network, target_network, linear_classifier, multilabel_linear_classificator, predictor,
+                 optimizer, optimizer_classificator, device, logs_folder, exp_name,
+                 config_path, transforms_path, main_script_path, pretrained, img_size,
+                 recover_from_checkpoint, preview_shape, classes, **params):
         self.preview_shape = preview_shape
-        self.recover = recover
         self.online_network = online_network
         self.target_network = target_network
         self.optimizer = optimizer
@@ -26,26 +28,25 @@ class BYOLTrainer:
         self.predictor = predictor
         self.max_epochs = params['max_epochs']
         self.linear_classifier = linear_classifier
+        self.multilabel_linear_classificator = multilabel_linear_classificator
         self.classification_loss = nn.CrossEntropyLoss()
+        self.multilabel_classification_loss = nn.BCELoss()
         self.optimizer_classificator = optimizer_classificator
-        if pretrained:
-            self.log_dir = os.path.join("logs", logs_folder, exp_name + "_pretrained")
-            self.writer = SummaryWriter(log_dir=self.log_dir)
-        else:
-            self.log_dir = os.path.join("logs", logs_folder, exp_name)
-            self.writer = SummaryWriter(log_dir=self.log_dir)
-            print("log folder")
-            print(os.path.join(logs_folder, exp_name))
-        self.m = params['m']
+        self.log_dir = os.path.join("logs", logs_folder, exp_name)
+        self.writer = SummaryWriter(log_dir=self.log_dir)
+        self.m = params['m'] #momentum
         self.batch_size = params['batch_size']
         self.num_workers = params['num_workers']
         self.checkpoint_interval = params['checkpoint_interval']
-        self.img_size = img_size
         self.epoch = 0
         self.start_epoch = 0
-        _create_model_training_folder(self.writer, files_to_same=[config_path, transforms_path])
+        self.classes = classes
+        _create_model_training_folder(self.writer, files_to_same=[config_path, transforms_path, main_script_path])
+        
+        print("---log folder---")
+        print(os.path.join(logs_folder, exp_name))
 
-        if self.recover:
+        if recover_from_checkpoint:
             PATH = os.path.join(self.log_dir, "best_model.pt")
             checkpoint = torch.load(PATH)
             self.online_network.load_state_dict(checkpoint['online_network_state_dict'])
@@ -76,6 +77,7 @@ class BYOLTrainer:
 
     def train(self, train_dataset, validation_dataset, eval_dataset):
         min_loss = 1000.0
+        max_acc = 0.0
         ### metterlo nell'init
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size,
                                   num_workers=self.num_workers, drop_last=True, shuffle=True)
@@ -104,13 +106,6 @@ class BYOLTrainer:
                 (batch_view_1, batch_view_2) = data[0]
                 
                 if not(done):
-                    """
-                    grid = torchvision.utils.make_grid(batch_view_1[:64])
-                    self.writer.add_image('views_1', grid, global_step=epoch_counter)
-
-                    grid = torchvision.utils.make_grid(batch_view_2[:64])
-                    self.writer.add_image('views_2', grid, global_step=epoch_counter)
-                    """
                     #pair the two views into a grid
                     for idx, e in enumerate(zip(batch_view_1[:64], batch_view_2[:64])):
                         if idx == 0:
@@ -139,25 +134,33 @@ class BYOLTrainer:
                 running_loss += loss.item()
             
             train_loss = running_loss/idx
-            #self.writer.add_scalar('train_loss', train_loss, global_step=epoch_counter)
+            self.writer.add_scalar('train_loss', train_loss, global_step=epoch_counter)
             running_loss = 0.0
             running_accuracy = 0.0
             
             for epoch in range(10):
+                print("Val-Classification Iteration")
+                print(epoch)
                 for idx, data in enumerate(eval_loader):
-                    print("Val-Classification Iteration")
-                    print(idx)
                     batch_view = data[0].to(self.device)
                     gtruth = data[1].to(self.device)
-                    loss, accuracy = self.eval_classify(batch_view, gtruth)
-                    running_loss += loss.item()
-                    running_accuracy += accuracy.item()
+                    loss_class, accuracy = self.eval_classify_multilabel(batch_view, gtruth) # calcolare fuori dal loop l'accuracy, per avere tutte le classi
+                    loss_class.backward()
+                    running_loss += loss_class.item()
+                    running_accuracy += accuracy
                     self.optimizer_classificator.zero_grad()
-                    loss.backward()
                     self.optimizer_classificator.step()
+                
+                accuracy = running_accuracy/idx
+                print(accuracy)
+                val_loss = running_loss/idx
                 running_loss = 0.0
                 running_accuracy = 0.0
+            
+            self.writer.add_scalars('val_accuracy', {'val_accuracy': accuracy}, global_step=epoch_counter)
             self.linear_classifier.reset_parameters()
+            
+            """
             # Sostituire con accuracy
             for idx, data in enumerate(validation_loader):
                 print("Val Iteration")
@@ -175,13 +178,20 @@ class BYOLTrainer:
             self.writer.add_scalars('loss', {'train_loss': train_loss,
                                     'val_loss': val_loss
             }, global_step=epoch_counter)
-            
+            """
+            """
             if loss < min_loss:
+                min_loss = loss
+                self.save_model(os.path.join(self.log_dir, "best_model.pt"))
+            """
+            if accuracy > max_acc:
+                max_acc = accuracy
                 self.save_model(os.path.join(self.log_dir, "best_model.pt"))
             
-            print("- End of epoch {} - Train Loss: {} - Validation Loss: {}".format(epoch_counter, train_loss, val_loss))
+            print("- End of epoch {} - Train Loss: {} - Validation Accuracy: {}, Validation classification Loss: {}".format(epoch_counter, train_loss, accuracy, val_loss))
 
         #print(torch.cuda.memory_allocated())
+        """
         torch.cuda.empty_cache()
         del self.target_network
         del batch_view_1
@@ -210,9 +220,7 @@ class BYOLTrainer:
             with torch.no_grad():
                 features_batch = self.online_network(batch_view)
 
-            
-            if idx == 0:
-                
+            if idx == 0:                
                 features = features_batch.to("cpu")
                 batch_view = resize(batch_view)
                 imgs = batch_view.to("cpu")
@@ -246,18 +254,13 @@ class BYOLTrainer:
             del features_batch
             del batch_view
             gc.collect()
-            
-
-        
-
+        """
         """
         # get the class labels for each image
         class_labels = [classes[lab] for lab in labels]
         """
         self.writer.close()
         print("Closed")
-
-
 
     def update(self, batch_view_1, batch_view_2):
         # compute query feature
@@ -289,8 +292,8 @@ class BYOLTrainer:
         return loss.mean()
     
     def get_accuracy(self, pred_arr, original_arr):
-        pred_arr = pred_arr.detach().numpy()
-        original_arr = original_arr.numpy()
+        pred_arr = pred_arr.cpu().detach().numpy()
+        original_arr = original_arr.cpu().detach().numpy()
         final_pred= []
 
         for i in range(len(pred_arr)):
@@ -303,6 +306,38 @@ class BYOLTrainer:
                 count+=1
         return count/len(final_pred)*100
 
+    def get_multilabel_accuracy(self, pred_arr, original_arr):  
+        pred_arr = np.round(pred_arr.cpu().detach().numpy())
+        original_arr = original_arr.cpu().detach().numpy()
+        class_rep = classification_report(pred_arr, original_arr, target_names=self.classes, output_dict=True, zero_division=1) # TODO
+        """
+        final_pred= []
+
+        for i in range(len(pred_arr)):
+            final_pred.append(np.argmax(pred_arr[i]))
+        final_pred = np.array(final_pred)
+        count = 0
+
+        for i in range(len(original_arr)):
+            if final_pred[i] == original_arr[i]:
+                count+=1
+        
+        return count/len(final_pred)*100
+        """
+        return class_rep["weighted avg"]["f1-score"]*100
+
+
+    def eval_classify_multilabel(self, batch_view, gtruth):
+        with torch.no_grad():
+            features = self.online_network(batch_view)
+        
+        predicted = self.multilabel_linear_classificator(features)
+        ## DEBUG HERE
+        loss = self.multilabel_classification_loss(predicted, gtruth)
+        #acc = self.get_multilabel_accuracy(torch.max(predicted,1)[1].float(), gtruth.float())
+        acc = self.get_multilabel_accuracy(predicted.float(), gtruth.float())
+        return loss, acc
+
     def eval_classify(self, batch_view, gtruth):
        
         with torch.no_grad():
@@ -310,9 +345,9 @@ class BYOLTrainer:
         
         predicted = self.linear_classifier(features)
         ## DEBUG HERE
-        loss = self.classification_loss(gtruth.float(), predicted.float())
-        acc = self.get_accuracy(gtruth, predicted)
-        return loss.mean(), acc
+        loss = self.classification_loss(predicted, gtruth)
+        acc = self.get_accuracy(torch.max(predicted,1)[1].float(), gtruth.float())
+        return loss, acc
 
     def get_features(self, batch_view):
         # compute query feature
@@ -320,7 +355,6 @@ class BYOLTrainer:
         with torch.no_grad():
             predictions = self.online_network(batch_view)
             
-
         return predictions
 
     def save_model(self, PATH):

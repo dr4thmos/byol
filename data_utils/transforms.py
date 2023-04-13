@@ -1,12 +1,16 @@
 print(__name__)
 from torchvision.transforms import transforms
+import torchvision.utils as utils
 #import sys
 #sys.path.append('byol/data_utils/custom_transforms')
 from . import custom_transforms as ct
+#import custom_transforms as ct
 from astropy.stats import sigma_clip
 import numpy as np
 import torch
 import torch.nn.functional as F
+import os
+from astropy.io import fits
 
 
 def get_data_transforms(**kwargs):
@@ -39,14 +43,6 @@ def get_data_transforms(**kwargs):
 
 def get_data_transforms_hulk(**kwargs):
     # get a set of data augmentation transformations as described in the SimCLR paper.
-
-    input_shape = (
-        kwargs["input_shape"]["width"],
-        kwargs["input_shape"]["height"],
-        kwargs["input_shape"]["channels"]
-    )
-        
-    
     data_transforms = transforms.Compose([
         #transforms.Lambda(sigma_clip_norm),
         transforms.Lambda(ct.add_norm_channel),
@@ -58,9 +54,9 @@ def get_data_transforms_hulk(**kwargs):
         transforms.RandomGrayscale(p=0.3),
         #transforms.Lambda(conditioned_resize),
         #transforms.Lambda(shift_and_pad_to_size),
-        transforms.RandomResizedCrop(size=kwargs["input_shape"]["width"], scale=(0.4, 1.0), ratio=(1.0, 1.0)),
+        transforms.RandomResizedCrop(size=kwargs["width"], scale=(0.4, 1.0), ratio=(1.0, 1.0)),
         transforms.RandomRotation(degrees=90.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=True),
-        transforms.Resize(kwargs["input_shape"]["width"]),
+        transforms.Resize(kwargs["width"]),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
         #transforms.RandomInvert(),
@@ -122,7 +118,7 @@ def get_data_transforms_eval_robin(**kwargs):
         #transforms.Lambda(ct.conditioned_resize),
         transforms.Lambda(ct.pad_to_square),
         transforms.Grayscale(num_output_channels=3),
-        transforms.Resize((input_shape[0],input_shape[1])),
+        transforms.Resize((kwargs["width"],kwargs["height"])),
         #transforms.Resize(input_shape[0]),
         #transforms.RandomHorizontalFlip(),
         #transforms.RandomVerticalFlip(),
@@ -133,3 +129,15 @@ def get_data_transforms_eval_robin(**kwargs):
     ])
     return data_transforms
 
+if __name__ == "__main__":
+    image_path = os.path.join("G002.5+0.0IFx_Mosaic_Mom0_cutout0001483.fits")
+    img = fits.getdata(image_path).astype(np.float32)
+    transform = transforms.Lambda(ct.add_norm_channel)
+    
+    img = transform(img)
+    tensorize = transforms.ToTensor()
+    img = tensorize(img)
+    utils.save_image(img[0,:,:], "G002.5+0.0IFx_Mosaic_Mom0_cutout0001483_0.png")
+    utils.save_image(img[1,:,:], "G002.5+0.0IFx_Mosaic_Mom0_cutout0001483_1.png")
+    utils.save_image(img[2,:,:], "G002.5+0.0IFx_Mosaic_Mom0_cutout0001483_2.png")
+    utils.save_image(img, "G002.5+0.0IFx_Mosaic_Mom0_cutout0001483.png")
