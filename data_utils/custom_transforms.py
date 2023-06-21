@@ -47,6 +47,12 @@ def norm_minmax(im):
     im[~non_nan_idx] = 0
     return im
 
+def remove_nan(im):
+    non_nan_idx = ~np.isnan(im)
+    min_image = np.min(im[non_nan_idx])
+    im[~non_nan_idx] = min_image
+    return im
+
 
 
 def sigma_clip_transform(t):

@@ -1,209 +1,177 @@
-from torchvision import transforms, datasets
-from sklearn import preprocessing
-from torch.utils.data.dataloader import DataLoader
-from model_utils.resnet_base_network import ResNet
-from data_utils.usecase1 import UseCase1
-from data_utils.balanced_split import balanced_split, quotas_balanced_split
-from data_utils.transforms import get_data_transforms_eval, get_data_transforms
-
-from sklearn.metrics import confusion_matrix
+import os
+import random
+import numpy as np
 
 import matplotlib.pyplot as plt
-import seaborn as sn
-import pandas as pd
-import torchvision
-import numpy as np
-import os
+
+import json
+
 import torch
-import sys
-import yaml
+import torch.nn as nn
+from sklearn.metrics import classification_report, multilabel_confusion_matrix, confusion_matrix, ConfusionMatrixDisplay
+from data_utils.hulk import Hulk
+
+from torch.utils.data.dataloader import DataLoader
+from general_utils.losses import FocalLoss
+
+from data_utils import transforms as my_transforms
 import argparse
+import yaml
+import warnings
+from astropy.utils.exceptions import AstropyWarning
+from model_utils.resnet_base_network import ResNet
+from model_utils.linear_classifier import LinearClassifier
+from model_utils.multi_layer_classifier import MultiLayerClassifier
 
+# optimizer = SGD lr=0.03, momentum=0.9
+# 10 epochs
+# classes ['COMPACT', 'DIFFUSE', 'DIFFUSE-LARGE', 'EXTENDED', 'FILAMENT', 'RADIO-GALAXY', 'RING', 'ARTEFACT']
 
-#experiment_folder = "runs"
-#experiment_folder = "benchmark"
+# BCELoss
+# Imagenet weights freezed + linear classificator
+# end weighted f1-score 70.43
+# Random weights freezed + linear classificator
+# Random weights + linear classificator
+# Byol wrights freezed + linear classificator
 
-#experiments = sorted(os.listdir(experiment_folder))
-#experiment = experiments[-1]
-#experiment = "1_channel_sigma3_minmax_histeq"
-#print(experiment)
+# FocalLoss
+# Imagenet weights freezed + linear classificator
+# Random weights freezed + linear classificator
+# Random weights + linear classificator
+# Byol wrights freezed + linear classificator
+
+warnings.simplefilter('ignore', category=AstropyWarning)
 
 parser = argparse.ArgumentParser(
-                    prog = 'Byol Trainer',
-                    description = 'Train Byol',
+                    prog = 'Eval model on multilabel data',
+                    description = 'Provide model metrics',
                     epilog = 'epilogo')
 
-#parser.add_argument('current_config')          # positional argument
-parser.add_argument('-e', '--experiment')      # option that takes a value
-parser.add_argument('-f', '--folder')      # option that takes a value
-parser.add_argument('-epc', '--epochs', default=10)
-parser.add_argument('-cl', '--num_classes', default=10)
-parser.add_argument('-bs', '--batch_size', default=128)
-#parser.add_argument('-v', '--verbose',
-#                    action='store_true')  # on/off flag
+# example command line
+#parser.add_argument('current_config')           # yaml in the /configs folder
+parser.add_argument('-f', '--folder')           # where to log results
+parser.add_argument('-e', '--experiment')       # exp name (invented, representative)
 
 args = parser.parse_args()
 
-model_path = os.path.join(args.folder, args.experiment, "checkpoints/model.pth")
-config_path = os.path.join(args.folder, args.experiment, "checkpoints/config.yaml")
-result_path = os.path.join(args.folder, args.experiment, "checkpoints/result.png")
+#os.path.join("logs", logs_folder, exp_name)
 
-print(model_path)
-print(config_path)
+logs_path = os.path.join("logs", args.folder, args.experiment)
 
+config_path = os.path.join("logs", args.folder, args.experiment, "checkpoints", "config.yaml")
 config = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
 
-data_transform = get_data_transforms(**config['network'])
+data_path = "4-HULK"
+data_transform = my_transforms.get_data_transforms_eval_hulk(**config['network'])
+datalist = "labeled.json"
 
-data_path = os.path.join("data", config["dataset"])
+batch_size = 256
+num_workers = 4
 
-data_custom = UseCase1(targ_dir = data_path, transform = data_transform)
+data_labeled = Hulk(targ_dir = data_path, transform = data_transform, datalist="labeled.json")
 
-split = 0.5
+loader_labeled = DataLoader(data_labeled, batch_size=batch_size,
+                                  num_workers=num_workers, drop_last=False, shuffle=False)
 
-train_dataset, test_dataset = quotas_balanced_split(data_custom, split)
-print("Input shape:", train_dataset[0][0].shape)
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-                          num_workers=0, drop_last=False, shuffle=True)
+PATH = os.path.join(logs_path, "best_model.pt")
+checkpoint = torch.load(PATH)
 
-test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-                          num_workers=0, drop_last=False, shuffle=True)
+#config['network'][]
 
-device = 'cpu' #'cuda' if torch.cuda.is_available() else 'cpu'
+config['network']["pretrained_weights"] = True
 encoder = ResNet(**config['network'])
-output_feature_dim = encoder.projetion.net[0].in_features
 
-#load pre-trained parameters
+#encoder.load_state_dict(checkpoint['online_network_state_dict'])
+encoder.to(device)
 
-load_params = torch.load(model_path,
-                         map_location=torch.device(torch.device(device)))
+multilabel_linear_classificator = LinearClassifier(encoder.repr_shape, data_labeled.num_classes).to(device)
+#multilabel_linear_classificator = MultiLayerClassifier(encoder.repr_shape, data_labeled.num_classes).to(device)
+"""
+multilabel_linear_classificator = torch.nn.Sequential(
+        torch.nn.Linear(encoder.repr_shape, data_labeled.num_classes),
+        torch.nn.Sigmoid()
+        ).to(device)
+"""
+optimizer_classificator = torch.optim.SGD(list(multilabel_linear_classificator.parameters()), lr=0.03, momentum=0.9)
 
-if 'online_network_state_dict' in load_params:
-    encoder.load_state_dict(load_params['online_network_state_dict'])
-    print("Parameters successfully loaded.")
+multilabel_classification_loss = nn.BCELoss()#nn.BCEWithLogitsLoss() ##FocalLoss(gamma=2.) #nn.BCEWithLogitsLoss() #nn.BCELoss()
 
-# remove the projection head
-encoder = torch.nn.Sequential(*list(encoder.children())[:-1])
-encoder = encoder.to(device)
+running_loss = 0.0
+running_accuracy = 0.0
 
-def get_features_from_encoder(encoder, loader):
-    x_train = []
-    y_train = []
+#pred_arr_stacked = []
+#original_arr_stacked = []
 
-    # get the features from the pre-trained model
-    for i, (x, y) in enumerate(loader):
+for epoch in range(30):
+    print("Val-Classification Iteration")
+    print(epoch)
+    for idx, data in enumerate(loader_labeled):
+        batch_view = data[0].to(device)
+        gtruth = data[1].to(device)
         with torch.no_grad():
-            feature_vector = encoder(x)
-            x_train.extend(feature_vector)
-            y_train.extend(y.numpy())
-
-            
-    x_train = torch.stack(x_train)
-    y_train = torch.tensor(y_train)
-    return x_train, y_train
-
-encoder.eval()
-x_train, y_train = get_features_from_encoder(encoder, train_loader)
-x_test, y_test = get_features_from_encoder(encoder, test_loader)
-
-if len(x_train.shape) > 2:
-    x_train = torch.mean(x_train, dim=[2, 3])
-    x_test = torch.mean(x_test, dim=[2, 3])
+            features = encoder(batch_view, repr=True)
     
-print("Training data shape:", x_train.shape, y_train.shape)
-print("Testing data shape:", x_test.shape, y_test.shape)
+        predicted = multilabel_linear_classificator(features)
+        ## DEBUG HERE
+        loss_class = multilabel_classification_loss(predicted, gtruth)
+        #loss_class = sigmoid_focal_loss(predicted, gtruth)
+        #print(loss_class.item())
+        loss_class.backward()
+        #running_loss += loss_class.item()
+        optimizer_classificator.step()
+        optimizer_classificator.zero_grad()
 
-def create_data_loaders_from_arrays(X_train, y_train, X_test, y_test):
+        pred_arr = np.round(predicted.float().cpu().detach().numpy())
+        original_arr = gtruth.float().cpu().detach().numpy()
+        if idx == 0:
+            pred_arr_concatenated = pred_arr
+            original_arr_concatenated = original_arr
+        else:
+            pred_arr_concatenated = np.concatenate((pred_arr_concatenated, pred_arr), axis=0)
+            original_arr_concatenated = np.concatenate((original_arr_concatenated, original_arr), axis=0)
 
-    train = torch.utils.data.TensorDataset(X_train, y_train)
-    train_loader = torch.utils.data.DataLoader(train, batch_size=64, shuffle=True)
-
-    test = torch.utils.data.TensorDataset(X_test, y_test)
-    test_loader = torch.utils.data.DataLoader(test, batch_size=512, shuffle=False)
-    return train_loader, test_loader
-
-
-scaler = preprocessing.StandardScaler()
-scaler.fit(x_train)
-x_train = scaler.transform(x_train).astype(np.float32)
-x_test = scaler.transform(x_test).astype(np.float32)
-
-
-train_loader, test_loader = create_data_loaders_from_arrays(torch.from_numpy(x_train), y_train, torch.from_numpy(x_test), y_test)
-
-class LogisticRegression(torch.nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(LogisticRegression, self).__init__()
-        self.linear = torch.nn.Linear(input_dim, output_dim)
-        #self.sigmoid = torch.nn.Sigmoid(input_dim, output_dim)
-        
-    def forward(self, x):
-        return self.linear(x)
-
-logreg = LogisticRegression(output_feature_dim, args.num_classes)
-logreg = logreg.to(device)
-
-optimizer = torch.optim.Adam(logreg.parameters(), lr=3e-4)
-criterion = torch.nn.CrossEntropyLoss()
-eval_every_n_epochs = 10
-
-for epoch in range(int(args.epochs)):
-#     train_acc = []
-    for x, y in train_loader:
-
-        x = x.to(device)
-        y = y.to(device)
-        
-        # zero the parameter gradients
-        optimizer.zero_grad()        
-        
-        logits = logreg(x)
-        
-        predictions = torch.argmax(logits, dim=1)
-        #print(torch.unique(predictions))
-        loss = criterion(logits, y)
-        
-        loss.backward()
-        optimizer.step()
     
-    total = 0
-    if epoch % eval_every_n_epochs == 0:
-        y_pred = []
-        y_true = []
-        correct = 0
-        for x, y in test_loader:
-            x = x.to(device)
-            y = y.to(device)
+    #mcm = multilabel_confusion_matrix(original_arr_concatenated, pred_arr_concatenated, labels = data_labeled.classes)
+    
+    
+    min = random.randint(0, len(original_arr_concatenated)-15)
+    max = min + 15
+    print(original_arr_concatenated[min:max])
+    print(pred_arr_concatenated[min:max])
+    
+    mcm = multilabel_confusion_matrix(original_arr_concatenated, pred_arr_concatenated)
+    print(mcm)
 
-            logits = logreg(x)
-            predictions = torch.argmax(logits, dim=1)
-            
-            total += y.size(0)
-            correct += (predictions == y).sum().item()
+    f, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.ravel()
+    for i in range(data_labeled.num_classes):
+        disp = ConfusionMatrixDisplay(confusion_matrix(original_arr_concatenated[:, i],
+                                                    pred_arr_concatenated[:, i], normalize="all")*100,
+                                    display_labels=[0, i])
+        disp.plot(ax=axes[i], values_format='.4g')
+        disp.ax_.set_title(data_labeled.classes[i])
+        if i<8:
+            disp.ax_.set_xlabel('')
+        if i%4!=0:
+            disp.ax_.set_ylabel('')
+        disp.im_.colorbar.remove()
 
-            y_pred.extend(predictions) 
-            y_true.extend(y)
-            
-        acc = 100 * correct / total
-        print(f"Testing accuracy: {np.mean(acc)}")
+    plt.subplots_adjust(wspace=0.10, hspace=0.1)
+    f.colorbar(disp.im_, ax=axes)
+    if (epoch == 0) or (epoch == 29):
+        plt.savefig('conf_mat_imagenet{}.png'.format(epoch))
+    plt.close()
 
-classes = ('C1', 'C2', 'C3', 'EXT', 'EXT-MI', 'DIFFUSE', 'BG')
-
-cf_matrix = confusion_matrix(y_true, y_pred, labels=[i for i, _ in enumerate(classes)], normalize="true")
-"""
-df_cm = pd.DataFrame(cf_matrix/np.sum(cf_matrix) *100, index = [i for i in classes],
-                    columns = [i for i in classes])
-"""
-df_cm = pd.DataFrame(cf_matrix, index = [i for i in classes],
-                    columns = [i for i in classes])
-plt.figure(figsize = (12,7))
-sn.heatmap(df_cm, annot=True)
-plt.savefig(result_path)
-"""
-for x, y in test_loader:
-    x = x.to(device)
-    y = y.to(device)
-    repr = encoder.forward(x)
-
-"""
+    #print(len(pred_arr_concatenated))
+    class_rep = classification_report(original_arr_concatenated, pred_arr_concatenated, target_names=data_labeled.classes, output_dict=False, zero_division=0.) # TODO
+    print(class_rep)
+    class_rep = classification_report(original_arr_concatenated, pred_arr_concatenated, target_names=data_labeled.classes, output_dict=True, zero_division=0.) # TODO
+    
+    if (epoch == 0) or (epoch == 29):
+        with open('report_imagenet_{}.json'.format(epoch), 'w') as outfile:
+            json.dump(class_rep, outfile)
+    
+    weighted_f1_score = class_rep["weighted avg"]["f1-score"]*100
+    print(weighted_f1_score)

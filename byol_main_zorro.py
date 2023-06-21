@@ -1,15 +1,17 @@
 
 from data_utils.multi_view_data_injector import MultiViewDataInjector
-from data_utils.transforms import get_data_transforms, get_data_transforms_hulk, get_data_transforms_eval_hulk, get_data_transforms_eval_robin, get_data_transforms_hulk_without_normalization
+from data_utils.transforms import get_data_transforms, get_data_transforms_zorro, get_data_transforms_zorro_eval, get_data_transforms_hulk, get_data_transforms_eval_hulk, get_data_transforms_eval_robin, get_data_transforms_hulk_without_normalization
 #from data_utils.usecase1 import UseCase1
 from data_utils.hulk import Hulk
+from data_utils.zorro2 import Zorro
 from data_utils.robin import Robin
 #from data_utils.balanced_split import balanced_split, quotas_balanced_split
 #from data_utils.data_setup_with_labels import create_dataloaders
 from model_utils.mlp_head import MLPHead
 from model_utils.resnet_base_network import ResNet
 from model_utils.linear_classifier import LinearClassifier
-from engine_utils.byol_engine import BYOLTrainer
+#from engine_utils.byol_engine_no_class import BYOLTrainer
+from engine_utils.byol_engine_single_class import BYOLTrainer
 from astropy.utils.exceptions import AstropyWarning
 import warnings
 import os
@@ -55,7 +57,7 @@ split_mode = "fixed"
 
 config_path = os.path.join( src_dir, config_dir, args.current_config )
 transforms_path = os.path.join( src_dir, "data_utils", "transforms.py" ) # To be copied by summarywriter in logs
-main_script_path = os.path.join( src_dir, "byol_main.py" ) # To be copied by summarywriter in logs
+main_script_path = os.path.join( src_dir, "byol_main_zorro.py" ) # To be copied by summarywriter in logs
 
 #network = "resnet18"
 
@@ -65,26 +67,39 @@ def main():
     
     config = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
 
-    data_transform = get_data_transforms_hulk(**config['network']['input_shape'])
-    #data_transform = get_data_transforms_hulk_without_normalization(**config['network']['input_shape'])
-    data_transform_eval = get_data_transforms_eval_hulk(**config['network'])
+    #data_transform = get_data_transforms_hulk(**config['network']['input_shape'])
+    data_transform = get_data_transforms_zorro(**config['network']['input_shape'])
+    data_transform_eval = get_data_transforms_zorro_eval(**config['network']['input_shape'])
 
     data_path   = os.path.join(data_dir, config["dataset"])
     #eval_data_path   = os.path.join(data_dir, "2-ROBIN")
     eval_data_path   = os.path.join(data_dir, config["dataset"])
 
     #data_custom = Hulk(targ_dir = data_path, transform = MultiViewDataInjector([data_transform, data_transform]))
-    validation_dataset = Hulk(targ_dir = data_path,
-                              transform = MultiViewDataInjector([data_transform, data_transform]),
-                              datalist="labeled.json")
+
+    """
+    train_dataset = Zorro('1-ZORRO/data', '1-ZORRO/data/train_all.txt', 
+            MultiViewDataInjector([data_transform, data_transform]), config["network"]["input_shape"]["width"]
+        )
+    validation_dataset = Zorro('1-ZORRO/data', '1-ZORRO/data/val_all.txt',
+            MultiViewDataInjector([data_transform, data_transform]), config["network"]["input_shape"]["width"]
+        )
+    """
+    data_path = "1-ZORRO/data"
+    train_dataset = Zorro(targ_dir = data_path, transform = MultiViewDataInjector([data_transform, data_transform]),
+                          datalist="train.json"
+        )
+    validation_dataset = Zorro(targ_dir = data_path, transform = MultiViewDataInjector([data_transform, data_transform]),
+                          datalist="validation.json"
+        )
     
-    train_dataset = Hulk(targ_dir = data_path,
-                         transform = MultiViewDataInjector([data_transform, data_transform]),
-                         datalist="unlabeled.json")
-    #train_dataset = torch.utils.data.Subset(train_dataset, range(1,200000))
+    eval_dataset = Zorro(targ_dir = data_path, transform = data_transform_eval,
+                          datalist="validation.json"
+        )
+    #train_dataset = torch.utils.data.Subset(train_dataset, range(1,10000))
 
     
-    eval_data = Hulk(targ_dir = data_path, transform = data_transform_eval, datalist="labeled.json")
+    #eval_data = Hulk(targ_dir = data_path, transform = data_transform_eval, datalist="labeled.json")
     #eval_data = torch.utils.data.Subset(eval_data, range(1,23000))
     #eval_data = Robin(targ_dir = eval_data_path, transform = data_transform_eval)
     
@@ -100,22 +115,22 @@ def main():
 
     print(len(train_dataset))
     print(len(validation_dataset))
-    print(len(eval_data))
+    #print(len(eval_data))
     
-    # online network
+    # Twin networks
     online_network = ResNet(**config['network']).to(device)
     target_network = ResNet(**config['network']).to(device)
+
     predictor = MLPHead(in_channels=online_network.projetion.net[-1].out_features,
                         **config['network']['projection_head']).to(device)
     optimizer = torch.optim.SGD(list(online_network.parameters()) + list(predictor.parameters()),
                                 **config['optimizer']['params'])
     
     linear_classificator = torch.nn.Linear(
-        online_network.repr_shape, eval_data.num_classes).to(device)
-    multilabel_linear_classificator = LinearClassifier(online_network.repr_shape, eval_data.num_classes).to(device)
-    optimizer_classificator = torch.optim.SGD(list(multilabel_linear_classificator.parameters()),
-                                **config['optimizer']['params'])
+        online_network.repr_shape, eval_dataset.num_classes).to(device)
     
+    optimizer_classificator = torch.optim.SGD(list(linear_classificator.parameters()),
+                                **config['optimizer']['params'])
     config["trainer"]["max_epochs"] = int(args.epochs)
         
     if args.from_checkpoint:
@@ -126,7 +141,7 @@ def main():
     trainer = BYOLTrainer(online_network=online_network,
                           target_network=target_network,
                           linear_classifier=linear_classificator,
-                          multilabel_linear_classificator = multilabel_linear_classificator,
+                          multilabel_linear_classificator = None,
                           optimizer=optimizer,
                           optimizer_classificator=optimizer_classificator,
                           predictor=predictor,
@@ -140,29 +155,11 @@ def main():
                           img_size = config["network"]["input_shape"]["width"],
                           recover_from_checkpoint = recover_from_checkpoint,
                           preview_shape = config["network"]["preview_shape"],
-                          classes = validation_dataset.classes,
-                          optimizer_params = config['optimizer']['params'],
+                          classes = None,
                           **config["trainer"])
 
-    trainer.train(train_dataset, validation_dataset, eval_data)
+    trainer.train(train_dataset, validation_dataset, eval_dataset)
     
-    """
-    pretrained_folder = config['network']['fine_tune_from']
-
-    # load pre-trained model if defined
-    if pretrained_folder:
-        try:
-            checkpoints_folder = os.path.join('./runs', pretrained_folder, 'checkpoints')
-
-            # load pre-trained parameters
-            load_params = torch.load(os.path.join(os.path.join(checkpoints_folder, 'model.pth')),
-                                     map_location=torch.device(torch.device(device)))
-
-            online_network.load_state_dict(load_params['online_network_state_dict'])
-
-        except FileNotFoundError:
-            print("Pre-trained weights not found. Training from scratch.")
-    """
 
 if __name__ == '__main__':
     main()

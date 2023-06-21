@@ -6,4 +6,5 @@ def _create_model_training_folder(writer, files_to_same):
     if not os.path.exists(model_checkpoints_folder):
         os.makedirs(model_checkpoints_folder)
         for file in files_to_same:
-            copyfile(file, os.path.join(model_checkpoints_folder, file))
+            os.makedirs(os.path.join(model_checkpoints_folder, os.path.split(file)[0]))
+            copyfile(file, os.path.join(model_checkpoints_folder, os.path.split(file)[0]))

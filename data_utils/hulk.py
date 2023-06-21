@@ -32,6 +32,14 @@ class Hulk(Dataset):
         self.targ_dir       = targ_dir
         self.transform      = transform
         self.info           = self.load_info(datalist)
+
+        """
+        self.labels = ['UNKNOWN', 'ARTEFACT', 'BACKGROUND', 'BORDER', 'COMPACT', 'DIFFUSE', 'DIFFUSE-LARGE',
+        'EXTENDED', 'FILAMENT', 'MOSAICING', 'RADIO-GALAXY', 'RING', 'WTF']
+        """
+        self.labels = ['COMPACT', 'DIFFUSE', 'DIFFUSE-LARGE',
+        'EXTENDED', 'FILAMENT', 'RADIO-GALAXY', 'RING', 'ARTEFACT']
+        #self.weights = [0.5, 1., 1., 1., 1., 1., 1.]
         self.classes = self.multilabel_one_hot_encoding()
         #self.class_to_idx   = self.enumerate_classes()
         self.num_classes    = len(self.classes)
@@ -45,8 +53,9 @@ class Hulk(Dataset):
         return torch.DoubleTensor(weights.to_list())
 
     def multilabel_one_hot_encoding(self):
-        mlb = MultiLabelBinarizer()
+        mlb = MultiLabelBinarizer(classes=self.labels)
         self.info["one_hot"] = mlb.fit_transform(self.info["source_type"]).tolist()
+        
         print(mlb.classes_)
         return mlb.classes_
         

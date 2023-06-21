@@ -1,33 +1,21 @@
 
 from data_utils.multi_view_data_injector import MultiViewDataInjector
 from data_utils.transforms import get_data_transforms, get_data_transforms_hulk, get_data_transforms_eval_hulk, get_data_transforms_eval_robin, get_data_transforms_hulk_without_normalization
-#from data_utils.usecase1 import UseCase1
 from data_utils.hulk import Hulk
-from data_utils.robin import Robin
-#from data_utils.balanced_split import balanced_split, quotas_balanced_split
-#from data_utils.data_setup_with_labels import create_dataloaders
 from model_utils.mlp_head import MLPHead
-from model_utils.resnet_base_network import ResNet
-from model_utils.linear_classifier import LinearClassifier
-from engine_utils.byol_engine import BYOLTrainer
+from model_utils.resnet_base_network_multilabel_classification import ResNet
 from astropy.utils.exceptions import AstropyWarning
+warnings.simplefilter('ignore', category=AstropyWarning)
 import warnings
 import os
 import torch
 import yaml
 import argparse
-#from astropy.io import fits
-
-#TORUN: python byol/byol_main.py -f hulk-test-debug -e hulk-3-robin --epochs 1 three_smash.yaml
-
-#TODO Add num_classes to HULK
-#TODO Fix embedding generate even if possible image rendering > len(dataset)
-
-
-warnings.simplefilter('ignore', category=AstropyWarning)
 
 print(torch.__version__)
 torch.manual_seed(0)
+
+### TODO move parser in a separate file
 
 parser = argparse.ArgumentParser(
                     prog = 'Byol Trainer',
@@ -65,8 +53,8 @@ def main():
     
     config = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
 
-    data_transform = get_data_transforms_hulk(**config['network']['input_shape'])
-    #data_transform = get_data_transforms_hulk_without_normalization(**config['network']['input_shape'])
+    #data_transform = get_data_transforms_hulk(**config['network']['input_shape'])
+    data_transform = get_data_transforms_hulk_without_normalization(**config['network']['input_shape'])
     data_transform_eval = get_data_transforms_eval_hulk(**config['network'])
 
     data_path   = os.path.join(data_dir, config["dataset"])
@@ -81,7 +69,7 @@ def main():
     train_dataset = Hulk(targ_dir = data_path,
                          transform = MultiViewDataInjector([data_transform, data_transform]),
                          datalist="unlabeled.json")
-    #train_dataset = torch.utils.data.Subset(train_dataset, range(1,200000))
+    train_dataset = torch.utils.data.Subset(train_dataset, range(1,10000))
 
     
     eval_data = Hulk(targ_dir = data_path, transform = data_transform_eval, datalist="labeled.json")
@@ -141,7 +129,6 @@ def main():
                           recover_from_checkpoint = recover_from_checkpoint,
                           preview_shape = config["network"]["preview_shape"],
                           classes = validation_dataset.classes,
-                          optimizer_params = config['optimizer']['params'],
                           **config["trainer"])
 
     trainer.train(train_dataset, validation_dataset, eval_data)

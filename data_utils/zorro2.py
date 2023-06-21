@@ -2,19 +2,37 @@ import os
 import pathlib
 import torch
 import pandas as pd
-from astropy.io import fits
 #from PIL import Image
 import numpy as np
 from torch.utils.data import Dataset
 from torchvision.transforms import transforms
 from typing import Tuple, Dict, List
 from torchvision.transforms.functional import to_pil_image
-import torchvision.transforms as T 
 
-from astropy.visualization import ZScaleInterval
-from astropy.stats import sigma_clip
 # Write a custom dataset class (inherits from torch.utils.data.Dataset)
 from torch.utils.data import Dataset
+
+from pathlib import Path
+import torch
+import torch.utils.data
+import json
+import torchvision.transforms as T 
+from torchvision.transforms.functional import to_pil_image
+
+from astropy.visualization import ZScaleInterval
+from torch.utils.data import Dataset
+import warnings
+from astropy.io import fits
+from astropy.stats import sigma_clip
+from astropy.io.fits.verify import VerifyWarning
+import numpy as np
+
+
+warnings.simplefilter('ignore', category=VerifyWarning)
+
+
+CLASSES = ['background', 'spurious', 'compact', 'extended']
+COLORS = [[0, 0, 0], [0, 0, 1], [1, 0, 0], [0, 1, 0]]
 
 class RemoveNaNs(object):
     def __init__(self):
@@ -69,9 +87,9 @@ class Unsqueeze(object):
 
 
 
-class Robin(Dataset):
+class Zorro(Dataset):
     
-    def __init__(self, targ_dir: str = "2-ROBIN", transform=None) -> None:
+    def __init__(self, targ_dir: str = "1-ZORRO/data", transform=None, datalist="info.json") -> None:
         #self.paths = list(pathlib.Path(targ_dir).glob("*.npy"))
         self.targ_dir = targ_dir
         self.preprocessing = T.Compose([
@@ -83,9 +101,8 @@ class Robin(Dataset):
                 MinMaxNormalize(),
                 Unsqueeze(),
         ])
-        
         self.transform  = transform
-        self.info       = self.load_info()
+        self.info       = self.load_info(datalist)
         self.class_to_idx = self.enumerate_classes()
         self.num_classes = len(self.class_to_idx)
         self.weights = self.setup_weights()
@@ -99,9 +116,9 @@ class Robin(Dataset):
     def enumerate_classes(self):
         return {cls_name: i for i, cls_name in enumerate(self.info["source_type"].unique())}
     
-    def load_info(self):
+    def load_info(self, datalist):
         #info_file = os.path.join(self.targ_dir, 'info.json')
-        info_file = os.path.join(self.targ_dir, 'info.json')
+        info_file = os.path.join(self.targ_dir, datalist)
         df = pd.read_json(info_file, orient="index")
         return df
 
@@ -111,9 +128,14 @@ class Robin(Dataset):
         try:
             image_path = os.path.join(self.targ_dir, self.info.iloc[index]["target_path"])
             img = fits.getdata(image_path).astype(np.float32)
+            #img.unsqueeze_(0)
+            #img = img.repeat(3, 1, 1)
         except:
+            print(img.shape)
+            print("Exception in load image at path and index:")
+            print(image_path)
             print(index)
-        return self.preprocessing(img), self.info.iloc[index]["source_type"]
+        return img, self.info.iloc[index]["source_type"]
     
     def filter_dataset(self):
         # probably a Sampler will be used
@@ -130,10 +152,11 @@ class Robin(Dataset):
         # Transform if necessary
         if self.transform:
             #return self.transform(img), class_idx # return data, label (X, y)
-            return self.transform(img), self.class_to_idx[label] # return data, label (X)
+            
+            return self.transform(self.preprocessing(img)), self.class_to_idx[label] # return data, label (X)
         else:
             #return img, class_idx # return data, label (X, y)
-            return img, self.class_to_idx[label] # return data, label (X)
+            return self.preprocessing(img), self.class_to_idx[label] # return data, label (X)
 
 
 

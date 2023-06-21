@@ -46,7 +46,7 @@ config = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
 
 data_path = "4-HULK"
 data_transform = my_transforms.get_data_transforms_eval_hulk(**config['network'])
-datalist = "labeled.json"
+#datalist = "labeled.json"
 
 batch_size = 128
 num_workers = 4
@@ -77,6 +77,7 @@ encoder.load_state_dict(checkpoint['online_network_state_dict'])
 encoder.to(device)
 
 resize = transforms.Resize(preview_shape)
+grayscale = transforms.Grayscale()
 
 writer = SummaryWriter(log_dir=logs_path+"-projector")
 
@@ -90,9 +91,10 @@ for idx, data in enumerate(tobeprojected_loader_labeled):
     with torch.no_grad():
         features_batch = encoder(batch_view)
 
-    if idx == 0:                
+    batch_view = resize(batch_view)
+    batch_view = grayscale(batch_view)
+    if idx == 0:
         features = features_batch.to("cpu")
-        batch_view = resize(batch_view)
         imgs = batch_view.to("cpu")
         metadata = data[1]
         print("done")
@@ -116,11 +118,9 @@ for idx, data in enumerate(tobeprojected_loader_labeled):
             del imgs
             gc.collect()
             features = features_batch.to("cpu")
-            batch_view = resize(batch_view)
             imgs = batch_view.to("cpu")
         else:
             features = torch.cat((features, features_batch.to("cpu")), 0)
-            batch_view = resize(batch_view)
             imgs = torch.cat((imgs, batch_view.to("cpu")), 0)
             metadata = torch.cat((metadata, data[1]), 0)
 if not(at_least_one_projection):

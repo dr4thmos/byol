@@ -3,9 +3,12 @@ from torch import nn
 
 class LinearClassifier(nn.Module):
     def __init__(self, in_channels, out_classes):
-        super(MLPHead, self).__init__()
+        super(LinearClassifier, self).__init__()
 
-        nn.Linear(in_channels, out_classes)
+        self.net = nn.Sequential(
+            nn.Linear(in_channels, out_classes),
+            nn.Sigmoid()
+        )
 
     def forward(self, x):
         return self.net(x)

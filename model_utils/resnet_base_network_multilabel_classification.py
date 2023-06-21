@@ -2,30 +2,31 @@ import torchvision.models as models
 import torch
 from model_utils.mlp_head import MLPHead
 
-
 class ResNet(torch.nn.Module):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, out_classes, *args, **kwargs):
         super(ResNet, self).__init__()
         if kwargs['name'] == 'resnet18':
-            if (kwargs["pretrained_weights"] == True) & (kwargs['fine_tune_from'] is None):
+            if kwargs["pretrained_weights"] == True:
                 resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
             else:
                 resnet = models.resnet18(weights=None)
         elif kwargs['name'] == 'resnet50':
-            if kwargs['fine_tune_from'] is None:
-                if kwargs["pretrained_weights"] == True:
-                    resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-                else:
-                    resnet = models.resnet50(weights=None)
+            if kwargs["pretrained_weights"] == True:
+                resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+            else:
+                resnet = models.resnet50(weights=None)
                 
-        self.repr_shape = resnet.fc.in_features
-        self.encoder = torch.nn.Sequential(*list(resnet.children())[:-1])
-        #self.encoder.conv1 = torch.nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         
-        if (kwargs['fine_tune_from'] is None) & (kwargs["pretrained_weights"] == False):
+        self.encoder = torch.nn.Sequential(*list(resnet.children())[:-1])
+        self.repr_shape = resnet.fc.in_features
+        
+        if kwargs["pretrained_weights"] == False:
             self.encoder[0] = torch.nn.Conv2d(kwargs["input_shape"]["channels"], 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         
-        self.projetion = MLPHead(in_channels=resnet.fc.in_features, **kwargs['projection_head'])
+        self.classificator = self.net = torch.nn.Sequential(
+            torch.nn.Linear(self.repr_shape, out_classes),
+            torch.nn.Sigmoid()
+        )
         
 
     def forward(self, x, repr=False):
@@ -34,4 +35,4 @@ class ResNet(torch.nn.Module):
             return h.view(h.shape[0], h.shape[1])
         else:
             h = h.view(h.shape[0], h.shape[1])
-            return self.projetion(h)
+            return self.classificator(h)
