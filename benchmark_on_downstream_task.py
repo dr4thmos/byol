@@ -29,9 +29,9 @@ IMG_SIZE = 128
 def plot_grid(data, writer, epoch_counter):
     grid = torchvision.utils.make_grid(data[:64])
     writer.add_image('views_paired', grid, global_step=epoch_counter)
-    print("Grid done")
+    #print("Grid done")
 
-def train_linear_classifier(base_model, train_dataset, eval_dataset, n_epochs=10):
+def train_linear_classifier(base_model, train_dataset, eval_dataset, n_epochs=20):
     linear_classificator = torch.nn.Linear(
         base_model.repr_shape, train_dataset.num_classes).to(device)
     finetuning_model = FinetuneEncoder(base_model.encoder, linear_classificator).to(device)
@@ -42,7 +42,7 @@ def train_linear_classifier(base_model, train_dataset, eval_dataset, n_epochs=10
     }
     optimizer = torch.optim.SGD(list(finetuning_model.parameters()),
                                 **optimizer_config)
-    criterion = torch.nn.BCELoss()
+    criterion = torch.nn.CrossEntropyLoss()
     
     trainer_config = {
         "batch_size": 256,
@@ -69,16 +69,16 @@ def train_linear_classifier(base_model, train_dataset, eval_dataset, n_epochs=10
                 grid_done = plot_grid(image_batch, writer, epoch_counter)
             #print(image_batch.shape)
             predicted = finetuning_model(image_batch)
-            print(predicted.shape)
-            print(data[1].shape)
-            print(data[1].to(device))
-            print(predicted.to(device))
+            #print(predicted.shape)
+            #print(data[1].shape)
+            #print(data[1].to(device))
+            #print(predicted.to(device))
             loss = criterion(predicted.to(device), data[1].to(device))
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
-            acc = top_k_score(data[1].to(device), predicted,k=1)
+            acc = top_k_accuracy_score(data[1].to("cpu").detach().numpy(), predicted.to("cpu").detach().numpy(),k=1)
             running_accuracy += acc
 
         finetuning_model.eval()
@@ -93,7 +93,7 @@ def train_linear_classifier(base_model, train_dataset, eval_dataset, n_epochs=10
             loss = criterion(predicted, data[1].to(device))
             running_val_loss += loss.item()
             
-            acc = accuracy_score(data[1].to(device), predicted)
+            acc = top_k_accuracy_score(data[1].to("cpu").detach().numpy(), predicted.to("cpu").detach().numpy(),k=1)
             running_val_accuracy += acc
         
         val_acc         = running_val_accuracy/len(validation_loader)
@@ -117,6 +117,8 @@ def test_linear_classifier(model, n_classes, dataset, iteration):
     pass
 
 device = "cuda"
+
+
 base_model_config = {
     "name": "resnet18",
     "input_shape":{
@@ -124,21 +126,14 @@ base_model_config = {
         "height": 128,
         "channels": 3
     },
-    "fine_tune_from": "logs/test/test4/best_model.pt",
+    "fine_tune_from": None,
     "projection_head":{
         "mlp_hidden_size": 1024,
         "projection_size": 512
     },
-    "pretrained_weights": True
+    "pretrained_weights": False
 }
 base_model = ResNet(**base_model_config).to(device)
-
-checkpoint = torch.load(base_model_config["fine_tune_from"])
-base_model.load_state_dict(checkpoint['online_network_state_dict'])
-
-#print(summary(pretrained_model.encoder, (3,128,128)))
-#print(summary(linear_classificator, (pretrained_model.repr_shape)))
-writer = SummaryWriter(log_dir=os.path.join("logs","benchmark", "args.experiment"))
 
 zorro_train_data_augmentation       = transforms.Compose([
         transforms.RandomRotation(degrees=90.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=True),
@@ -169,8 +164,116 @@ zorro_validation_dataset  = Zorro(targ_dir = ZORRO_DATA_PATH, transform = zorro_
 zorro_eval_dataset        = Zorro(targ_dir = ZORRO_DATA_PATH, transform = zorro_validation_data_augmentation,
                         datalist="validation.json"
     )
+#print(summary(pretrained_model.encoder, (3,128,128)))
+#print(summary(linear_classificator, (pretrained_model.repr_shape)))
+writer = SummaryWriter(log_dir=os.path.join("logs","benchmark", "zorro_scratch"))
+train_linear_classifier(base_model, zorro_train_dataset, zorro_validation_dataset)
+
+
+base_model_config = {
+    "name": "resnet18",
+    "input_shape":{
+        "width": 128,
+        "height": 128,
+        "channels": 3
+    },
+    "fine_tune_from": "logs/test/test4/best_model.pt",
+    "projection_head":{
+        "mlp_hidden_size": 1024,
+        "projection_size": 512
+    },
+    "pretrained_weights": True
+}
+base_model = ResNet(**base_model_config).to(device)
+
+checkpoint = torch.load(base_model_config["fine_tune_from"])
+base_model.load_state_dict(checkpoint['online_network_state_dict'])
+
+
+zorro_train_data_augmentation       = transforms.Compose([
+        transforms.RandomRotation(degrees=90.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=True),
+        transforms.Resize([IMG_SIZE,IMG_SIZE]),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
+        transforms.Lambda(lambda x: x.repeat(3, 1, 1) ),
+        transforms.ConvertImageDtype(dtype=torch.float32)
+    ])
+
+zorro_validation_data_augmentation  = transforms.Compose([
+        #transforms.RandomRotation(degrees=90.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=True),
+        transforms.Resize([IMG_SIZE,IMG_SIZE]),
+        #transforms.RandomHorizontalFlip(),
+        #transforms.RandomVerticalFlip(),
+        transforms.Lambda(lambda x: x.repeat(3, 1, 1) ),
+        transforms.ConvertImageDtype(dtype=torch.float32)
+    ])
+zorro_train_dataset       = Zorro(targ_dir = ZORRO_DATA_PATH, transform = zorro_train_data_augmentation,
+                        datalist="train.json"
+    )
+
+zorro_validation_dataset  = Zorro(targ_dir = ZORRO_DATA_PATH, transform = zorro_validation_data_augmentation,
+                        datalist="validation.json"
+    )
+
+zorro_eval_dataset        = Zorro(targ_dir = ZORRO_DATA_PATH, transform = zorro_validation_data_augmentation,
+                        datalist="validation.json"
+    )
+#print(summary(pretrained_model.encoder, (3,128,128)))
+#print(summary(linear_classificator, (pretrained_model.repr_shape)))
+writer = SummaryWriter(log_dir=os.path.join("logs","benchmark", "zorro_byol"))
 
 train_linear_classifier(base_model, zorro_train_dataset, zorro_validation_dataset)
+
+base_model_config = {
+    "name": "resnet18",
+    "input_shape":{
+        "width": 128,
+        "height": 128,
+        "channels": 3
+    },
+    "fine_tune_from": None,
+    "projection_head":{
+        "mlp_hidden_size": 1024,
+        "projection_size": 512
+    },
+    "pretrained_weights": True
+}
+base_model = ResNet(**base_model_config).to(device)
+
+zorro_train_data_augmentation       = transforms.Compose([
+        transforms.RandomRotation(degrees=90.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=True),
+        transforms.Resize([IMG_SIZE,IMG_SIZE]),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
+        transforms.Lambda(lambda x: x.repeat(3, 1, 1) ),
+        transforms.ConvertImageDtype(dtype=torch.float32)
+    ])
+
+zorro_validation_data_augmentation  = transforms.Compose([
+        #transforms.RandomRotation(degrees=90.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=True),
+        transforms.Resize([IMG_SIZE,IMG_SIZE]),
+        #transforms.RandomHorizontalFlip(),
+        #transforms.RandomVerticalFlip(),
+        transforms.Lambda(lambda x: x.repeat(3, 1, 1) ),
+        transforms.ConvertImageDtype(dtype=torch.float32)
+    ])
+
+zorro_train_dataset       = Zorro(targ_dir = ZORRO_DATA_PATH, transform = zorro_train_data_augmentation,
+                        datalist="train.json"
+    )
+
+zorro_validation_dataset  = Zorro(targ_dir = ZORRO_DATA_PATH, transform = zorro_validation_data_augmentation,
+                        datalist="validation.json"
+    )
+
+zorro_eval_dataset        = Zorro(targ_dir = ZORRO_DATA_PATH, transform = zorro_validation_data_augmentation,
+                        datalist="validation.json"
+    )
+#print(summary(pretrained_model.encoder, (3,128,128)))
+#print(summary(linear_classificator, (pretrained_model.repr_shape)))
+writer = SummaryWriter(log_dir=os.path.join("logs","benchmark", "zorro_imagenet"))
+train_linear_classifier(base_model, zorro_train_dataset, zorro_validation_dataset)
+
 
 """
 eval_loader         = DataLoader(zorro_eval_dataset, batch_size=config['trainer']['batch_size'],

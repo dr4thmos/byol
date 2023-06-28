@@ -8,10 +8,10 @@ class FinetuneEncoder(torch.nn.Module):
         self.encoder = encoder # resnet
         self.classifier = torch.nn.Sequential(
             classifier,
-            torch.nn.Softmax()
+            torch.nn.Softmax(dim = 1)
         )
         
     def forward(self, x):
         h = self.encoder(x)
-        print(h.shape)
+        #print(h.shape)
         return self.classifier(h.view(h.shape[0], h.shape[1]))
