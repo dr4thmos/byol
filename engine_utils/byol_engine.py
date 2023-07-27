@@ -88,19 +88,13 @@ class BYOLTrainer:
         validation_loader = DataLoader(validation_dataset, batch_size=self.batch_size,
                                   num_workers=self.num_workers, drop_last=False, shuffle=True)
 
-        eval_loader = DataLoader(eval_dataset, batch_size=self.batch_size,
-                                  num_workers=self.num_workers, drop_last=True, shuffle=True)
-
         model_checkpoints_folder = os.path.join(self.writer.log_dir, 'checkpoints')
 
         self.initializes_target_network()
-
-        accuracy_method = MultilabelAccuracy(num_labels=8, average='weighted')
         
         for epoch_counter in range(self.start_epoch, self.start_epoch + self.max_epochs):
             self.epoch = epoch_counter
-            print("Epoch")
-            print(epoch_counter)
+            print(f"Epoch: {epoch_counter}")
             running_loss = 0.0
             
             done = False # to make only one time plot_grid
@@ -144,13 +138,13 @@ class BYOLTrainer:
             self.writer.add_scalar('train_loss', train_loss, global_step=epoch_counter)
             running_loss = 0.0
             running_accuracy = 0.0
-            
+            """
             self.online_network.eval()
             self.predictor.eval()
             for epoch in range(5):
                 print("Val-Classification Iteration")
                 print(epoch)
-                for idx, data in enumerate(eval_loader):
+                for idx, data in enumerate(validation_loader):
                     batch_view = data[0].to(self.device)
                     gtruth = data[1].to(self.device)
                     with torch.no_grad():
@@ -188,6 +182,7 @@ class BYOLTrainer:
                 print(accuracy)
                 self.writer.add_scalars('val_accuracy', {str(self.epoch): accuracy}, global_step=epoch)
             """
+            """
             for epoch in range(10):
                 print("Val-Classification Iteration")
                 print(epoch)
@@ -212,16 +207,16 @@ class BYOLTrainer:
             for layer in self.multilabel_linear_classificator.children():
                 layer.reset_parameters()
             """
-            self.multilabel_linear_classificator = LinearClassifier(self.online_network.repr_shape, eval_dataset.num_classes).to('cuda')
+            #self.multilabel_linear_classificator = LinearClassifier(self.online_network.repr_shape, eval_dataset.num_classes).to('cuda')
             #self.linear_classifier.reset_parameters()
-            self.optimizer_classificator = torch.optim.SGD(list(self.multilabel_linear_classificator.parameters()),
-                                **self.optimizer_params)
+            #self.optimizer_classificator = torch.optim.SGD(list(self.multilabel_linear_classificator.parameters()),
+            #                    **self.optimizer_params)
 
-            if accuracy > max_acc:
-                max_acc = accuracy
+            #if accuracy > max_acc:
+            #    max_acc = accuracy
             self.save_model(os.path.join(self.log_dir, "best_model.pt"))
             
-            print("- End of epoch {} - Train Loss: {} - Validation Accuracy: {}".format(epoch_counter, train_loss, accuracy))
+            print("- End of epoch {} - Train Loss: {}".format(epoch_counter, train_loss))
 
         self.writer.close()
         print("Closed")

@@ -76,6 +76,7 @@ class Curated(Dataset):
             #img = self.transform(img)
             #return img, mask
         except:
+            print(image_path)
             print(index)
         return img, torch.FloatTensor(self.info.iloc[index]["one_hot"])
     
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     
     transforms = transforms.Compose([transforms.ToTensor(),
         transforms.RandomRotation(degrees=90.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=True),
-        transforms.Resize([128,128]),
+        transforms.Resize([128,128], antialias=True),
         transforms.ConvertImageDtype(dtype=torch.float32)
     ])
     dataset = Hulk('2-ROBIN', transforms)

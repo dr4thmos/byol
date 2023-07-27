@@ -120,6 +120,54 @@ def get_data_transforms_hulk(**kwargs):
     ])
     return data_transforms
 
+def get_data_transforms_curated(**kwargs):
+    # get a set of data augmentation transformations as described in the SimCLR paper.
+    data_transforms = transforms.Compose([
+        #transforms.Lambda(sigma_clip_norm),
+        transforms.Lambda(ct.add_norm_channel),
+        #transforms.Lambda(norm_minmax),
+        transforms.ToTensor(),
+        
+        #transforms.RandomEqualize(p= 1.0),
+        transforms.ColorJitter(brightness = (0.8, 1), contrast = (0.9, 1.0), saturation = (0.5, 1.0), hue = 0.0),
+        transforms.RandomGrayscale(p=0.3),
+        #transforms.Lambda(conditioned_resize),
+        #transforms.Lambda(shift_and_pad_to_size),
+        transforms.RandomResizedCrop(size=kwargs["width"], scale=(0.4, 1.0), ratio=(1.0, 1.0), antialias=True),
+        #transforms.RandomRotation(degrees=15.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=False),
+        transforms.Resize(kwargs["width"], antialias=True),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
+        #transforms.RandomInvert(),
+        transforms.ConvertImageDtype(dtype=torch.float32)
+        #transforms.RandomApply([color_jitter], p=0.8),
+        #transforms.RandomGrayscale(p=0.2),
+        #GaussianBlur(kernel_size=int(0.1 * eval(input_shape)[0])),
+    ])
+    return data_transforms
+
+def get_data_transforms_eval_curated(**kwargs):
+    # get a set of data augmentation transformations as described in the SimCLR paper.
+    #color_jitter = transforms.ColorJitter(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s)
+    
+    """
+    input_shape = (
+        kwargs["input_shape"]["width"],
+        kwargs["input_shape"]["height"],
+        kwargs["input_shape"]["channels"]
+    )
+    """
+    #preview_shape = kwargs["preview_shape"]
+    data_transforms = transforms.Compose([transforms.Lambda(ct.add_norm_channel),
+                                        transforms.ToTensor(),
+                                        transforms.RandomRotation(degrees=90.0, interpolation=transforms.InterpolationMode.BILINEAR, expand=True),
+                                        transforms.RandomHorizontalFlip(),
+                                        transforms.RandomVerticalFlip(),
+                                        transforms.Resize(kwargs["input_shape"]["width"]),
+                                        transforms.ConvertImageDtype(dtype=torch.float32)
+    ])
+    return data_transforms
+
 def get_data_transforms_hulk_without_normalization(**kwargs):
     # get a set of data augmentation transformations as described in the SimCLR paper.
     data_transforms = transforms.Compose([
