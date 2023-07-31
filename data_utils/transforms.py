@@ -146,6 +146,7 @@ def get_data_transforms_curated(**kwargs):
     ])
     return data_transforms
 
+
 def get_data_transforms_eval_curated(**kwargs):
     # get a set of data augmentation transformations as described in the SimCLR paper.
     #color_jitter = transforms.ColorJitter(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s)
@@ -258,6 +259,18 @@ def get_data_transforms_eval_robin(**kwargs):
         #transforms.RandomApply([color_jitter], p=0.8),
         #transforms.RandomGrayscale(p=0.2),
         #GaussianBlur(kernel_size=int(0.1 * eval(input_shape)[0])),
+    ])
+    return data_transforms
+
+def get_data_transforms_test_robin(**kwargs):
+    
+    data_transforms = transforms.Compose([
+        #transforms.Lambda(ct.add_norm_channel),
+        #transforms.ToTensor(),
+        transforms.Lambda(ct.pad_to_square),
+        transforms.Lambda(lambda x: x.repeat(3,1,1)),
+        transforms.Resize((kwargs["width"],kwargs["height"]), antialias=True),
+        transforms.ConvertImageDtype(dtype=torch.float32)
     ])
     return data_transforms
 

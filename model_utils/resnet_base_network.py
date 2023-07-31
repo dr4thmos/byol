@@ -9,14 +9,17 @@ class ResNet(torch.nn.Module):
         if kwargs['name'] == 'resnet18':
             if (kwargs["pretrained_weights"] == True) & (kwargs['fine_tune_from'] is None):
                 resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+                print("Resnet18 model with imagenet weight loaded")
             else:
                 resnet = models.resnet18(weights=None)
+                print("Resnet18 model with random weight loaded")
         elif kwargs['name'] == 'resnet50':
-            if kwargs['fine_tune_from'] is None:
-                if kwargs["pretrained_weights"] == True:
-                    resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-                else:
-                    resnet = models.resnet50(weights=None)
+            if (kwargs["pretrained_weights"] == True) & (kwargs['fine_tune_from'] is None):
+                resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+                print("Resnet50 model with imagenet weight loaded")
+            else:
+                resnet = models.resnet50(weights=None)
+                print("Resnet50 model with random weight loaded")
                 
         self.repr_shape = resnet.fc.in_features
         self.encoder = torch.nn.Sequential(*list(resnet.children())[:-1])

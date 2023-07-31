@@ -71,7 +71,7 @@ class Unsqueeze(object):
 
 class Robin(Dataset):
     
-    def __init__(self, targ_dir: str = "2-ROBIN", transform=None) -> None:
+    def __init__(self, targ_dir: str = "2-ROBIN", transform=None, datalist="info.json") -> None:
         #self.paths = list(pathlib.Path(targ_dir).glob("*.npy"))
         self.targ_dir = targ_dir
         self.preprocessing = T.Compose([
@@ -99,9 +99,9 @@ class Robin(Dataset):
     def enumerate_classes(self):
         return {cls_name: i for i, cls_name in enumerate(self.info["source_type"].unique())}
     
-    def load_info(self):
+    def load_info(self, datalist = 'info.json'):
         #info_file = os.path.join(self.targ_dir, 'info.json')
-        info_file = os.path.join(self.targ_dir, 'info.json')
+        info_file = os.path.join(self.targ_dir, datalist)
         df = pd.read_json(info_file, orient="index")
         return df
 

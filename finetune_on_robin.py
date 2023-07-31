@@ -13,8 +13,8 @@ print(f"Training with: {device}")
 from astropy.utils.exceptions import AstropyWarning
 warnings.simplefilter('ignore', category=AstropyWarning)
 
-from general_utils.parser import create_parser
-from data_utils.transforms import get_data_transforms_zorro, get_data_transforms_zorro_eval
+from general_utils.parser import parse
+from data_utils.transforms import get_data_transforms_zorro, get_data_transforms_zorro_eval, get_data_transforms_test_robin
 from data_utils.robin import Robin
 from model_utils.resnet_base_network import ResNet
 from model_utils.finetune_encoder import FinetuneEncoder
@@ -24,7 +24,7 @@ from torchmetrics import Accuracy
 
 # TORUN: python byol/finetune_on_zorro.py -f log-folder-name -e log-subfodler-name --epochs 1 config.yaml
 
-parser = create_parser()
+parser = parse()
 args = parser.parse_args()
 
 data_dir = "."
@@ -43,12 +43,11 @@ model_checkpoints_folder = os.path.join(writer.log_dir, 'checkpoints')
 
 def main():
     
-    data_transform      = get_data_transforms_zorro(**config['network']['input_shape'])
-    data_transform_eval = get_data_transforms_zorro_eval(**config['network']['input_shape'])
+    data_transform      = get_data_transforms_test_robin(**config['network']['input_shape'])
 
     data_path           = os.path.join(data_dir, config["dataset"])
 
-    dataset       = Robin(targ_dir = data_path, transform = data_transform)
+    dataset       = Robin(targ_dir = data_path, transform = data_transform, datalist = "info_wo_meerkat.json")
     num_classes = dataset.num_classes
     train_split = int(0.8 * len(dataset))
     val_split  = len(dataset) - train_split

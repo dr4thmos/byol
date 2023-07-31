@@ -2,6 +2,7 @@ import os
 import psutil
 import gc
 import torch
+from tqdm import tqdm
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
@@ -19,7 +20,7 @@ class BYOLTrainer:
     def __init__(self, online_network, target_network, linear_classifier, multilabel_linear_classificator, predictor,
                  optimizer, optimizer_classificator, device, logs_folder, exp_name,
                  config_path, transforms_path, main_script_path, pretrained, img_size,
-                 recover_from_checkpoint, preview_shape, classes, **params):
+                 recover_from_checkpoint, preview_shape, classes, test_every_n_epochs, **params):
         self.preview_shape = preview_shape
         self.online_network = online_network
         self.target_network = target_network
@@ -41,6 +42,8 @@ class BYOLTrainer:
         self.epoch = 0
         self.start_epoch = 0
         self.classes = classes
+        self.class_train_epochs = 10
+        self.test_every_n_epochs = test_every_n_epochs
         _create_model_training_folder(self.writer, files_to_same=[config_path, transforms_path, main_script_path])
         
         print("---log folder---")
@@ -69,6 +72,16 @@ class BYOLTrainer:
         y = F.normalize(y, dim=1)
         return 2 - 2 * (x * y).sum(dim=-1)
 
+    def _reshape_zipped(self, bw1, bw2):
+        for aug_idx, e in enumerate(zip(bw1, bw2)):
+            if aug_idx == 0:
+                c = torch.stack((e[0],e[1]))
+                d = c
+            else:
+                c = torch.stack((e[0],e[1]))
+                d = torch.cat((d, c))
+        return d
+
     def initializes_target_network(self):
         # init momentum network as encoder net
         for param_q, param_k in zip(self.online_network.parameters(), self.target_network.parameters()):
@@ -85,7 +98,7 @@ class BYOLTrainer:
         validation_loader = DataLoader(validation_dataset, batch_size=self.batch_size,
                                   num_workers=self.num_workers, drop_last=False, shuffle=True)
 
-        eval_loader = DataLoader(eval_dataset, batch_size=self.batch_size,
+        test_loader = DataLoader(eval_dataset, batch_size=self.batch_size,
                                   num_workers=self.num_workers, drop_last=False, shuffle=True)
 
         model_checkpoints_folder = os.path.join(self.writer.log_dir, 'checkpoints')
@@ -94,98 +107,99 @@ class BYOLTrainer:
         
         for epoch_counter in range(self.start_epoch, self.start_epoch + self.max_epochs):
             self.epoch = epoch_counter
-            print("Epoch")
-            print(epoch_counter)
-            running_loss = 0.0
-            
-            done = False # to make only one time plot_grid
-
-            for idx, data in enumerate(train_loader):
-                print("Train Iteration")
-                print(idx)
-                (batch_view_1, batch_view_2) = data[0]
+            with tqdm(train_loader, unit="batch") as tepoch:
+                tepoch.set_description(f"Epoch {epoch_counter}")
+                running_loss = 0.0
                 
-                if not(done):
-                    #pair the two views into a grid
-                    for idx, e in enumerate(zip(batch_view_1[:64], batch_view_2[:64])):
+                grid_done = False # to make only one time plot_grid
+                for idx, data in enumerate(tepoch, start=1):
+                    (batch_view_1, batch_view_2) = data[0]
+                    
+                    if not(grid_done):
+                        #pair the two views into a grid
+                        reshaped = self._reshape_zipped(batch_view_1[:64], batch_view_2[:64])
+                        grid = torchvision.utils.make_grid(reshaped)
+                        self.writer.add_image('views_paired_train', grid, global_step=epoch_counter)
+                        grid_done = True
+                        print("Grid done")
+                    
+                    batch_view_1 = batch_view_1.to(self.device)
+                    batch_view_2 = batch_view_2.to(self.device)
+                    
+                    loss = self.update(batch_view_1, batch_view_2)                
+
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+
+                    self._update_target_network_parameters()  # update the key encoder
+                    running_loss += loss.item()
+                
+                train_loss = running_loss/idx
+                
+                tepoch.set_postfix(loss=train_loss)
+                self.writer.add_scalar('train_loss', train_loss, global_step=epoch_counter)
+                running_loss        = 0.0
+                running_accuracy    = 0.0
+            
+            if self.epoch % self.test_every_n_epochs == 0 or self.epoch == 0 or self.epoch == self.max_epochs:
+                # Classificator training
+                grid_done = False
+                for test_epoch in range(self.class_train_epochs):
+                    print(f"Test Iteration: {test_epoch}")
+                    
+                    for idx, data in enumerate(test_loader):
+                        batch_views     = data[0].to(self.device)
+                        gtruth          = data[1].to(self.device)
+
+                        if not(grid_done):
+                            grid = torchvision.utils.make_grid(batch_views[:64])
+                            self.writer.add_image('views_paired_downstream', grid, global_step=self.epoch)
+
+                            grid_done = True
+                            print("Grid done")
+
+                        with torch.no_grad():
+                            features    = self.online_network(batch_views, repr=True)
+                    
+                        predicted       = self.linear_classifier(features)
+                        ## DEBUG HERE
+                        loss_class      = self.classification_loss(predicted, gtruth)
+                        predicted       = torch.argmax(predicted, axis = 1)
+                        #print(loss_class.item())
+                        loss_class.backward()
+                        #running_loss += loss_class.item()
+                        self.optimizer_classificator.step()
+                        self.optimizer_classificator.zero_grad()
+                        
+                        pred_arr = np.round(predicted.float().cpu().detach().numpy())
+                        original_arr = gtruth.float().cpu().detach().numpy()
                         if idx == 0:
-                            c = torch.stack((e[0],e[1]))
-                            d = c
+                            pred_arr_concatenated = pred_arr
+                            original_arr_concatenated = original_arr
                         else:
-                            c = torch.stack((e[0],e[1]))
-                            d = torch.cat((d, c))
+                            pred_arr_concatenated = np.concatenate((pred_arr_concatenated, pred_arr), axis=0)
+                            original_arr_concatenated = np.concatenate((original_arr_concatenated, original_arr), axis=0)
+
+                    #print(len(pred_arr_concatenated))
+                    class_rep = accuracy_score(original_arr_concatenated, pred_arr_concatenated) # TODO
+                    #print(class_rep)
                     
-                    grid = torchvision.utils.make_grid(d[:64])
-                    self.writer.add_image('views_paired', grid, global_step=epoch_counter)
-
-                    done = True
-                    print("Grid done")
-                
-                batch_view_1 = batch_view_1.to(self.device)
-                batch_view_2 = batch_view_2.to(self.device)
-                
-                loss = self.update(batch_view_1, batch_view_2)                
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-
-                self._update_target_network_parameters()  # update the key encoder
-                running_loss += loss.item()
-            
-            train_loss = running_loss/idx
-            self.writer.add_scalar('train_loss', train_loss, global_step=epoch_counter)
-            running_loss = 0.0
-            running_accuracy = 0.0
-            
-            # Classificator training
-
-            for epoch in range(10):
-                print("Val-Classification Iteration")
-                print(epoch)
-                for idx, data in enumerate(eval_loader):
-                    batch_view = data[0].to(self.device)
-                    gtruth = data[1].to(self.device)
-                    with torch.no_grad():
-                        features = self.online_network(batch_view, repr=True)
-                
-                    predicted = self.linear_classifier(features)
-                    ## DEBUG HERE
-                    loss_class = self.classification_loss(predicted, gtruth)
-                    predicted = torch.argmax(predicted, axis = 1)
-                    #print(loss_class.item())
-                    loss_class.backward()
-                    #running_loss += loss_class.item()
-                    self.optimizer_classificator.step()
-                    self.optimizer_classificator.zero_grad()
+                    #print(original_arr_concatenated[:10])
+                    #print(pred_arr_concatenated[:10])
                     
-                    pred_arr = np.round(predicted.float().cpu().detach().numpy())
-                    original_arr = gtruth.float().cpu().detach().numpy()
-                    if idx == 0:
-                        pred_arr_concatenated = pred_arr
-                        original_arr_concatenated = original_arr
-                    else:
-                        pred_arr_concatenated = np.concatenate((pred_arr_concatenated, pred_arr), axis=0)
-                        original_arr_concatenated = np.concatenate((original_arr_concatenated, original_arr), axis=0)
+                    accuracy = class_rep
+                    print(f"Accuracy at iteration {test_epoch}: {accuracy}")
 
-                print(len(pred_arr_concatenated))
-                class_rep = accuracy_score(original_arr_concatenated, pred_arr_concatenated) # TODO
-                print(class_rep)
+                self.writer.add_scalars('val_accuracy', {'val_accuracy': accuracy}, global_step=epoch_counter)
+                self.linear_classifier.reset_parameters()
+
+                if accuracy > max_acc:
+                    max_acc = accuracy
+                    self.save_model(os.path.join(self.log_dir, "best_model.pt"))
                 
-                print(original_arr_concatenated[:10])
-                print(pred_arr_concatenated[:10])
-                
-                accuracy = class_rep
-                print(accuracy)
-
-            self.writer.add_scalars('val_accuracy', {'val_accuracy': accuracy}, global_step=epoch_counter)
-            self.linear_classifier.reset_parameters()
-
-            if accuracy > max_acc:
-                max_acc = accuracy
-                self.save_model(os.path.join(self.log_dir, "best_model.pt"))
-            
-            print("- End of epoch {} - Train Loss: {} - Validation Accuracy: {}".format(epoch_counter, train_loss, accuracy))
+                print("- End of epoch {} - Train Loss: {} - Validation Accuracy: {}".format(epoch_counter, train_loss, max_acc))    
+            print("- End of epoch {} - Train Loss: {}".format(epoch_counter, train_loss))
 
         self.writer.close()
         print("Closed")

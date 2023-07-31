@@ -1,6 +1,6 @@
 import argparse
 
-def create_parser():
+def parse():
     parser = argparse.ArgumentParser(
                     prog = 'Byol Trainer',
                     description = 'Train Byol',
@@ -10,6 +10,7 @@ def create_parser():
     parser.add_argument('-e', '--experiment')       # exp name (invented, representative)
     parser.add_argument('-f', '--folder')           # where to log results
     parser.add_argument('-epcs', '--epochs', default=30)      # option that takes a value
+    parser.add_argument('-t', '--test_every_n_epochs', default=5)      # option that takes a value
     parser.add_argument('-r', '--from_checkpoint', action='store_true')      # option that takes a value
-    
-    return parser
+    args = parser.parse_args()
+    return args

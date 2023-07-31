@@ -53,10 +53,14 @@ def main():
     data_path   = os.path.join(data_dir, config["dataset"])
 
     train_dataset       = Curated(targ_dir = data_path,
-                                transform = MultiViewDataInjector([data_transform, data_transform]))
+                                transform = MultiViewDataInjector([data_transform, data_transform]),
+                                datalist = "train.json"
+                            )
 
     validation_dataset  = Curated(targ_dir = data_path,
-                                transform = MultiViewDataInjector([data_transform, data_transform]))
+                                transform = MultiViewDataInjector([data_transform, data_transform]),
+                                datalist = "validation.json"
+                            )
     
     #train_dataset = torch.utils.data.Subset(train_dataset, range(1,200000))
 
