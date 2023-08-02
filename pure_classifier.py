@@ -12,7 +12,7 @@ import torch
 import yaml
 import argparse
 
-print(torch.__version__)
+print(torch.__version__)s
 torch.manual_seed(0)
 
 ### TODO move parser in a separate file

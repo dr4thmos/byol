@@ -68,8 +68,13 @@ def main():
 
     predictor = MLPHead(in_channels=online_network.projetion.net[-1].out_features,
                         **config['network']['projection_head']).to(device)
+    """
     optimizer = torch.optim.SGD(list(online_network.parameters()) + list(predictor.parameters()),
                                 **config['optimizer']['params'])
+    """
+    optimizer_params = {"lr": 0.0003}
+    optimizer = torch.optim.Adam(list(online_network.parameters()) + list(predictor.parameters()),
+                                **optimizer_params)
     
     config["trainer"]["max_epochs"] = int(args.epochs)
     linear_classificator    = torch.nn.Linear(
