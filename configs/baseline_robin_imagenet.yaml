@@ -1,15 +1,15 @@
 network:
   name: resnet50
   input_shape:
-    width: 256
-    height: 256
+    width: 224
+    height: 224
     channels: 1
   preview_shape: 32
 
   # Specify a folder containing a pre-trained model to fine-tune. If training from scratch, pass None.
   #fine_tune_from: 'resnet-18_40-epochs'
   fine_tune_from: None
-  pretrained_weights: false
+  pretrained_weights: true
 
   projection_head:
     mlp_hidden_size: 512
@@ -18,14 +18,14 @@ network:
 dataset: cutout_factor2.5/meerkat
 
 trainer:
-  batch_size: 64
+  batch_size: 128
   m: 0.996 # momentum update
   checkpoint_interval: 500000
-  max_epochs: 3000
-  num_workers: 8
+  max_epochs: 3
+  num_workers: 4
 
 optimizer:
   params:
-    lr: 0.03
+    lr: 0.003
     momentum: 0.9
     weight_decay: 0.0004

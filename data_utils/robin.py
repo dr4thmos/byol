@@ -85,7 +85,7 @@ class Robin(Dataset):
         ])
         
         self.transform  = transform
-        self.info       = self.load_info()
+        self.info       = self.load_info(datalist)
         self.class_to_idx = self.enumerate_classes()
         self.num_classes = len(self.class_to_idx)
         self.weights = self.setup_weights()

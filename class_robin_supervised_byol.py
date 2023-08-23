@@ -4,7 +4,7 @@ import torch
 import torchvision
 import numpy as np
 import yaml
-from data_utils.transforms_robin import get_data_transforms_train_robin, get_data_transforms_test_robin
+from data_utils.transforms_robin import get_data_transforms_train_robin, get_data_transforms_test_robin 
 from data_utils.robin import Robin
 from model_utils.mlp_head import MLPHead
 from model_utils.resnet_base_network_classification import ResNet
@@ -22,7 +22,7 @@ warnings.simplefilter('ignore', category=AstropyWarning)
 def main():
     
     args = parse()
-    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
     
     print(f"Training with: {device}")
     print(f"Number of epochs:{args.epochs}")
@@ -66,6 +66,7 @@ def main():
             transform = data_transform_train,
             datalist = "info_wo_meerkat_test_03.json"
         )
+        
 
     print(f"Train dataset: {len(train_dataset)}")
     print(f"Validation dataset: {len(validation_dataset)}")
@@ -78,12 +79,12 @@ def main():
 
     # online network
     backbone = ResNet(**config['network']).to(device)
-
+    #checkpoint = torch.load("logs/curated/adam_0003_1001/best_model.pt")
+    checkpoint = torch.load("logs/curated/adam_003_501/best_model.pt")
+    backbone.load_state_dict(checkpoint["online_network_state_dict"])
     linear_classificator    = torch.nn.Linear(
         backbone.repr_shape, dataset.num_classes).to(device)
-    optimizer_classificator =   torch.optim.SGD(
-        list(backbone.parameters()) + 
-        list(linear_classificator.parameters()),
+    optimizer_classificator =   torch.optim.SGD(list(linear_classificator.parameters()),
                                 **config['optimizer']['params'])
     classification_loss = torch.nn.CrossEntropyLoss()
 
@@ -91,7 +92,7 @@ def main():
 
     max_acc = 0.
     grid_done_train = False
-    grid_done_val = False
+    grid_done_validation = False
     for epoch in range(int(args.epochs)):
         print(f"Epoch: {epoch}")
         
@@ -105,7 +106,8 @@ def main():
                 grid_done_train = True
                 print("Grid done")
 
-            features    = backbone(batch_view, repr=True)
+            with torch.no_grad():
+                features    = backbone(batch_view, repr=True)
             predicted   = linear_classificator(features)
 
             loss_class  = classification_loss(predicted, gtruth)
@@ -139,10 +141,10 @@ def main():
             batch_view      = data[0].to(device)
             gtruth          = data[1].to(device)
 
-            if not(grid_done_val):
+            if not(grid_done_validation):
                 grid = torchvision.utils.make_grid(batch_view[:64])
                 writer.add_image('validation_view', grid, global_step=epoch)
-                grid_done_val = True
+                grid_done_validation = True
                 print("Grid done")
 
             with torch.no_grad():

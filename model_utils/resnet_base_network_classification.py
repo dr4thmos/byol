@@ -6,15 +6,19 @@ from model_utils.mlp_head import MLPHead
 class ResNet(torch.nn.Module):
     def __init__(self, *args, **kwargs):
         super(ResNet, self).__init__()
+        print("pretrained_weights = {}".format(kwargs["pretrained_weights"]))
+        print("fine_tune_from = {}".format(kwargs["fine_tune_from"]))
+        b = (kwargs["pretrained_weights"] == True) & (kwargs['fine_tune_from'] == "None")
+        print(b)
         if kwargs['name'] == 'resnet18':
-            if (kwargs["pretrained_weights"] == True) & (kwargs['fine_tune_from'] is None):
+            if (kwargs["pretrained_weights"] == True) & (kwargs['fine_tune_from'] == "None"):
                 resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
                 print("Resnet18 model with imagenet weight loaded")
             else:
                 resnet = models.resnet18(weights=None)
                 print("Resnet18 model with random weight loaded")
         elif kwargs['name'] == 'resnet50':
-            if (kwargs["pretrained_weights"] == True) & (kwargs['fine_tune_from'] is None):
+            if (kwargs["pretrained_weights"] == True) & (kwargs['fine_tune_from'] == "None"):
                 resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
                 print("Resnet50 model with imagenet weight loaded")
             else:

@@ -1,8 +1,8 @@
 network:
   name: resnet50
   input_shape:
-    width: 256
-    height: 256
+    width: 224
+    height: 224
     channels: 1
   preview_shape: 32
 
@@ -18,14 +18,14 @@ network:
 dataset: cutout_factor2.5/meerkat
 
 trainer:
-  batch_size: 64
+  batch_size: 128
   m: 0.996 # momentum update
   checkpoint_interval: 500000
-  max_epochs: 3000
-  num_workers: 8
+  max_epochs: 3
+  num_workers: 4
 
 optimizer:
   params:
-    lr: 0.03
+    lr: 0.003
     momentum: 0.9
     weight_decay: 0.0004
